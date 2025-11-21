@@ -13,4 +13,5 @@
 /mnt
 *.swp
 *.swo
+/fp_test
 
