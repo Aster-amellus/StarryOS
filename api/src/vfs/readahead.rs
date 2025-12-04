@@ -6,16 +6,16 @@
 
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
-use axfs_ng::FileBackend;
+use axfs::FileBackend;
 
 /// Page size in bytes (4KB)
 pub const PAGE_SIZE: u64 = 4096;
 
-/// Initial readahead size in pages
-const RA_INIT_PAGES: u32 = 4;
+/// Initial readahead size in pages (128KB = 32 pages)
+const RA_INIT_PAGES: u32 = 32;
 
-/// Maximum readahead size in pages (256KB = 64 pages)
-const RA_MAX_PAGES: u32 = 64;
+/// Maximum readahead size in pages (1MB = 256 pages)
+const RA_MAX_PAGES: u32 = 256;
 
 /// Minimum readahead size in pages (reserved for future use)
 #[allow(dead_code)]

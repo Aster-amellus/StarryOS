@@ -143,13 +143,19 @@ impl File {
             ReadaheadAction::Sync {
                 start_page,
                 num_pages,
+            } => {
+                // Perform sync readahead
+                do_sync_readahead(backend, start_page, num_pages);
             }
-            | ReadaheadAction::Async {
+            ReadaheadAction::Async {
                 start_page,
                 num_pages,
             } => {
-                // Perform readahead (sync for now, async TODO)
-                do_sync_readahead(backend, start_page, num_pages);
+                // Perform async readahead
+                let backend = backend.clone();
+                axtask::spawn(move || {
+                    backend.try_prefetch_pages(start_page, num_pages);
+                });
             }
             ReadaheadAction::None => {}
         }
