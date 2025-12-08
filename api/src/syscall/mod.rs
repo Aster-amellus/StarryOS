@@ -385,6 +385,7 @@ pub fn handle_syscall(uctx: &mut UserContext) {
         }
         Sysno::sched_getparam => sys_sched_getparam(uctx.arg0() as _, uctx.arg1() as _),
         Sysno::getpriority => sys_getpriority(uctx.arg0() as _, uctx.arg1() as _),
+        Sysno::setpriority => sys_setpriority(uctx.arg0() as _, uctx.arg1() as _, uctx.arg2() as _),
 
         // task ops
         Sysno::execve => sys_execve(uctx, uctx.arg0() as _, uctx.arg1() as _, uctx.arg2() as _),
@@ -590,9 +591,18 @@ pub fn handle_syscall(uctx: &mut UserContext) {
             uctx.arg3() as _,
         ),
 
+        // timerfd
+        Sysno::timerfd_create => sys_timerfd_create(uctx.arg0() as _, uctx.arg1() as _),
+        Sysno::timerfd_settime => sys_timerfd_settime(
+            uctx.arg0() as _,
+            uctx.arg1() as _,
+            uctx.arg2() as _, // new_value
+            uctx.arg3() as _, // old_value
+        ),
+        Sysno::timerfd_gettime => sys_timerfd_gettime(uctx.arg0() as _, uctx.arg1() as _),
+
         // dummy fds
-        Sysno::timerfd_create
-        | Sysno::fanotify_init
+        Sysno::fanotify_init
         | Sysno::inotify_init1
         | Sysno::userfaultfd
         | Sysno::perf_event_open

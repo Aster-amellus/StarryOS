@@ -163,3 +163,9 @@ pub fn sys_getpriority(which: u32, who: u32) -> AxResult<isize> {
         _ => Err(AxError::InvalidInput),
     }
 }
+
+/// TODO
+pub fn sys_setpriority(which: i32, who: i32, prio: i32) -> AxResult<isize> {
+    debug!("sys_setpriority <= which: {which}, who: {who}, prio: {prio}");
+    Ok(0)
+}

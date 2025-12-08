@@ -410,6 +410,7 @@ dependencies = [
  "axio",
  "axpoll",
  "axsync",
+ "axtask",
  "bitflags 2.10.0",
  "cfg-if",
  "chrono",

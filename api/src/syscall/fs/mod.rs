@@ -8,7 +8,8 @@ mod pidfd;
 mod pipe;
 mod signalfd;
 mod stat;
+mod timerfd;
 
 pub use self::{
-    ctl::*, event::*, fd_ops::*, io::*, memfd::*, mount::*, pidfd::*, pipe::*, signalfd::*, stat::*,
+    ctl::*, event::*, fd_ops::*, io::*, memfd::*, mount::*, pidfd::*, pipe::*, signalfd::*, stat::*, timerfd::*,
 };
