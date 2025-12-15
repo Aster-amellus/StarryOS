@@ -17,7 +17,7 @@ use linux_raw_sys::general::{AT_EMPTY_PATH, AT_FDCWD, AT_SYMLINK_NOFOLLOW};
 
 use super::{FileLike, Kstat, get_file_like};
 use crate::file::{SealedBuf, SealedBufMut};
-use crate::vfs::readahead::{ReadaheadAction, ReadaheadState, do_sync_readahead, readahead_decide};
+// use crate::vfs::readahead::{ReadaheadAction, ReadaheadState, do_sync_readahead, readahead_decide};
 use axio::BufMut;
 
 pub fn with_fs<R>(dirfd: c_int, f: impl FnOnce(&mut FsContext) -> AxResult<R>) -> AxResult<R> {
@@ -103,8 +103,8 @@ pub fn metadata_to_kstat(metadata: &Metadata) -> Kstat {
 pub struct File {
     inner: axfs::File,
     nonblock: AtomicBool,
-    /// Readahead state for sequential read optimization
-    ra_state: ReadaheadState,
+    // Readahead state for sequential read optimization
+    // ra_state: ReadaheadState,
 }
 
 impl File {
@@ -112,7 +112,7 @@ impl File {
         Self {
             inner,
             nonblock: AtomicBool::new(false),
-            ra_state: ReadaheadState::new(),
+            // ra_state: ReadaheadState::new(),
         }
     }
 
@@ -124,42 +124,42 @@ impl File {
         self.inner.location().flags().contains(NodeFlags::BLOCKING)
     }
 
-    /// Perform readahead based on current position and read length.
-    /// Called before actual read to prefetch pages.
-    fn maybe_readahead(&self, read_len: usize) {
-        // Get the file backend for readahead
-        let backend = match self.inner.backend() {
-            Ok(b) => b,
-            Err(_) => return,
-        };
+    // Perform readahead based on current position and read length.
+    // Called before actual read to prefetch pages.
+    // fn maybe_readahead(&self, read_len: usize) {
+    //     // Get the file backend for readahead
+    //     let backend = match self.inner.backend() {
+    //         Ok(b) => b,
+    //         Err(_) => return,
+    //     };
 
-        // Get current file position
-        let offset = self.inner.position();
+    //     // Get current file position
+    //     let offset = self.inner.position();
 
-        // Decide readahead action
-        let action = readahead_decide(&self.ra_state, backend, offset, read_len);
+    //     // Decide readahead action
+    //     let action = readahead_decide(&self.ra_state, backend, offset, read_len);
 
-        match action {
-            ReadaheadAction::Sync {
-                start_page,
-                num_pages,
-            } => {
-                // Perform sync readahead
-                do_sync_readahead(backend, start_page, num_pages);
-            }
-            ReadaheadAction::Async {
-                start_page,
-                num_pages,
-            } => {
-                // Perform async readahead
-                let backend = backend.clone();
-                axtask::spawn(move || {
-                    backend.try_prefetch_pages(start_page, num_pages);
-                });
-            }
-            ReadaheadAction::None => {}
-        }
-    }
+    //     match action {
+    //         ReadaheadAction::Sync {
+    //             start_page,
+    //             num_pages,
+    //         } => {
+    //             // Perform sync readahead
+    //             do_sync_readahead(backend, start_page, num_pages);
+    //         }
+    //         ReadaheadAction::Async {
+    //             start_page,
+    //             num_pages,
+    //         } => {
+    //             // Perform async readahead
+    //             let backend = backend.clone();
+    //             axtask::spawn(move || {
+    //                 backend.try_prefetch_pages(start_page, num_pages);
+    //             });
+    //         }
+    //         ReadaheadAction::None => {}
+    //     }
+    // }
 }
 
 fn path_for(loc: &Location) -> Cow<'static, str> {
@@ -173,7 +173,7 @@ impl FileLike for File {
         let read_len = dst.remaining_mut();
 
         // Trigger readahead for sequential access optimization
-        self.maybe_readahead(read_len);
+        // self.maybe_readahead(read_len);
 
         if likely(self.is_blocking()) {
             inner.read(dst)
