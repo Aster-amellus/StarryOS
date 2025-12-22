@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use core::{fmt, time::Duration};
+use core::{fmt, mem, ptr, time::Duration};
 
 use axerrno::{AxError, AxResult};
 use axpoll::IoEvents;
@@ -9,6 +9,7 @@ use linux_raw_sys::{
     general::*,
     select_macros::{FD_ISSET, FD_SET, FD_ZERO},
 };
+use starry_core::mm::access_user_memory;
 use starry_signal::SignalSet;
 
 use super::FdPollSet;
@@ -36,6 +37,31 @@ impl FdSet {
     }
 }
 
+fn load_fdset(ptr: UserPtr<__kernel_fd_set>) -> AxResult<Option<__kernel_fd_set>> {
+    if ptr.is_null() {
+        return Ok(None);
+    }
+    let set_ref = ptr.get_as_mut()?;
+    // Touching user memory may fault; make it recoverable.
+    let val = access_user_memory(|| -> AxResult<__kernel_fd_set> {
+        Ok(unsafe { ptr::read(set_ref) })
+    })?;
+    Ok(Some(val))
+}
+
+fn store_fdset(ptr: UserPtr<__kernel_fd_set>, value: &__kernel_fd_set) -> AxResult<()> {
+    if ptr.is_null() {
+        return Ok(());
+    }
+    let set_ref = ptr.get_as_mut()?;
+    access_user_memory(|| -> AxResult<()> {
+        unsafe {
+            ptr::write(set_ref, ptr::read(value));
+        }
+        Ok(())
+    })
+}
+
 impl fmt::Debug for FdSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(&self.0).finish()
@@ -61,13 +87,16 @@ fn do_select(
         None
     };
 
-    let mut readfds = nullable!(readfds.get_as_mut())?;
-    let mut writefds = nullable!(writefds.get_as_mut())?;
-    let mut exceptfds = nullable!(exceptfds.get_as_mut())?;
+    // Load input fd_sets into kernel memory. Writing user memory directly from the
+    // kernel may trigger a supervisor-mode page fault that won't be handled unless
+    // it's wrapped by `access_user_memory`.
+    let readfds_in = load_fdset(readfds)?;
+    let writefds_in = load_fdset(writefds)?;
+    let exceptfds_in = load_fdset(exceptfds)?;
 
-    let read_set = FdSet::new(nfds as _, readfds.as_deref());
-    let write_set = FdSet::new(nfds as _, writefds.as_deref());
-    let except_set = FdSet::new(nfds as _, exceptfds.as_deref());
+    let read_set = FdSet::new(nfds as _, readfds_in.as_ref());
+    let write_set = FdSet::new(nfds as _, writefds_in.as_ref());
+    let except_set = FdSet::new(nfds as _, exceptfds_in.as_ref());
 
     debug!(
         "sys_select <= nfds: {nfds} sets: [read: {read_set:?}, write: {write_set:?}, except: \
@@ -98,52 +127,68 @@ fn do_select(
     drop(fd_table);
     let fds = FdPollSet(fds);
 
-    if let Some(readfds) = readfds.as_deref_mut() {
-        unsafe { FD_ZERO(readfds) };
-    }
-    if let Some(writefds) = writefds.as_deref_mut() {
-        unsafe { FD_ZERO(writefds) };
-    }
-    if let Some(exceptfds) = exceptfds.as_deref_mut() {
-        unsafe { FD_ZERO(exceptfds) };
-    }
-    with_replacen_blocked(sigmask.copied(), || {
+    let ready_count: isize = with_replacen_blocked(sigmask.copied(), || {
         match block_on(future::timeout(
             timeout,
             poll_io(&fds, IoEvents::empty(), false, || {
+                // Only decide readiness here. Do NOT touch user fd_sets in this polling loop.
                 let mut res = 0usize;
-                for ((fd, interested), index) in fds.0.iter().zip(fd_indices.iter().copied()) {
-                    let events = fd.poll() & *interested;
-                    if events.contains(IoEvents::IN)
-                        && let Some(set) = readfds.as_deref_mut()
-                    {
+                for (fd, interested) in fds.0.iter().map(|(f, e)| (f, e)) {
+                    if !(fd.poll() & *interested).is_empty() {
                         res += 1;
-                        unsafe { FD_SET(index as _, set) };
-                    }
-                    if events.contains(IoEvents::OUT)
-                        && let Some(set) = writefds.as_deref_mut()
-                    {
-                        res += 1;
-                        unsafe { FD_SET(index as _, set) };
-                    }
-                    if events.contains(IoEvents::ERR)
-                        && let Some(set) = exceptfds.as_deref_mut()
-                    {
-                        res += 1;
-                        unsafe { FD_SET(index as _, set) };
                     }
                 }
                 if res > 0 {
                     return Ok(res as _);
                 }
-
                 Err(AxError::WouldBlock)
             }),
         )) {
             Ok(r) => r,
             Err(_) => Ok(0),
         }
-    })
+    })?;
+
+    // Build output fd_sets in kernel memory.
+    let mut out_read: __kernel_fd_set = unsafe { mem::zeroed() };
+    let mut out_write: __kernel_fd_set = unsafe { mem::zeroed() };
+    let mut out_except: __kernel_fd_set = unsafe { mem::zeroed() };
+    unsafe {
+        FD_ZERO(&mut out_read);
+        FD_ZERO(&mut out_write);
+        FD_ZERO(&mut out_except);
+    }
+
+    if ready_count > 0 {
+        let mut res = 0isize;
+        for ((fd, interested), index) in fds.0.iter().zip(fd_indices.iter().copied()) {
+            let events = fd.poll() & *interested;
+            if events.is_empty() {
+                continue;
+            }
+            res += 1;
+            if events.contains(IoEvents::IN) {
+                unsafe { FD_SET(index as _, &mut out_read) };
+            }
+            if events.contains(IoEvents::OUT) {
+                unsafe { FD_SET(index as _, &mut out_write) };
+            }
+            if events.contains(IoEvents::ERR) {
+                unsafe { FD_SET(index as _, &mut out_except) };
+            }
+        }
+
+        store_fdset(readfds, &out_read)?;
+        store_fdset(writefds, &out_write)?;
+        store_fdset(exceptfds, &out_except)?;
+        Ok(res)
+    } else {
+        // Timeout: select returns 0 and clears all sets.
+        store_fdset(readfds, &out_read)?;
+        store_fdset(writefds, &out_write)?;
+        store_fdset(exceptfds, &out_except)?;
+        Ok(0)
+    }
 }
 
 #[cfg(target_arch = "x86_64")]

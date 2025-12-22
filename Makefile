@@ -11,6 +11,10 @@ export VSOCK := n
 export MEM := 1G
 export ICOUNT := n
 
+# Host-side path to the ext4 rootfs image used for injection/extraction.
+# Note: do NOT export this into arceos; arceos expects DISK_IMG relative to its own cwd.
+DISK_IMG_PATH ?= arceos/disk.img
+
 # Generated Options
 export A := $(PWD)
 export NO_AXSTD := y
@@ -32,7 +36,7 @@ rootfs:
 		curl -f -L $(ROOTFS_URL)/$(ROOTFS_IMG).xz -O; \
 		xz -d $(ROOTFS_IMG).xz; \
 	fi
-	@cp $(ROOTFS_IMG) arceos/disk.img
+	@cp $(ROOTFS_IMG) $(DISK_IMG_PATH)
 
 img:
 	@echo -e "\033[33mWARN: The 'img' target is deprecated. Please use 'rootfs' instead.\033[0m"
@@ -43,6 +47,20 @@ defconfig justrun clean:
 
 build run debug disasm: defconfig
 	@make -C arceos $@
+
+# Capture QEMU console output to a host log file (useful for dd/md5 logs).
+LOGFILE ?= run.log
+runlog: defconfig
+	@make -C arceos run 2>&1 | tee $(LOGFILE)
+
+# Inject host-side benchmark scripts into the ext4 rootfs image (requires sudo).
+# This keeps the guest's /bin/bench_fio.sh in sync with scripts/bench_fio.sh.
+inject-bench:
+	@sh scripts/inject_bench_fio_to_disk.sh $(DISK_IMG_PATH)
+
+# Extract bench results (bench_*) from the ext4 rootfs image to ./bench_out/.
+fetch-bench:
+	@sh scripts/extract_bench_from_disk.sh $(DISK_IMG_PATH) bench_out
 
 # Aliases
 rv:
